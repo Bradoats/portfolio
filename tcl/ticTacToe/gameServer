@@ -1,0 +1,268 @@
+#start server 
+# Game state;
+#
+# TODO:
+#
+# Add "allocation of users" (x or o) from server to clients.
+#  - other clients that connect are just "observers" and their clicks are ignored.
+# Let the server check which user is associated with each chan, so that it knows
+# whether an X or an O is actually the current user's turn. (done)
+# (joke: look up "sox" extension in Tcl and implement discord) (rocket league quick chat added, UPDATE: regular chat added as well as displays winner to chat)
+array set gameboard ""
+set settings(current) "X"
+set activeClients {};
+set ttt ""
+set playerX "";
+set playerO "";
+
+puts "Server started and waiting for connections...";
+
+proc getBoard {} {
+	global gameboard;
+	set gameboardaslist {};
+    for {set y 1} {$y<=3} {incr y} {
+        for {set x 1} {$x<=3} {incr x} {
+            lappend gameboardaslist $gameboard($x,$y);
+        }
+    }
+	return $gameboardaslist;
+}
+
+proc printBoard {{chan stdout}} {
+    global gameboard
+    global ttt
+	set glist [getBoard];
+    puts $chan "=======================";
+	set index 0;
+    for {set y 1} {$y<=3} {incr y} {
+       for {set x 1} {$x<=3} {incr x} {
+          puts -nonewline $chan "[lindex $glist $index] ";
+					incr index;
+       }
+       puts $chan "";
+    }
+    puts $chan "=======================";      
+}
+
+proc sendBoard {chan} {
+		set glist [getBoard];
+		sendCommand $chan "BOARD" $glist;
+		# could just do:
+		# sendCommand "Board" [getBoard];
+}
+
+proc sendCommand {chan cmd payload} {
+	puts $chan "$cmd $payload";
+}
+
+proc reset_gameboard {} {
+    global gameboard;
+    for {set y 1} { $y<=3} { incr y } {
+  	    for {set x 1} { $x<=3} { incr x } {
+            set gameboard($x,$y) " "
+        }
+    }
+}
+
+proc placeXorO {chan x y} {
+    global gameboard settings activeClients playerX playerO
+
+    if {$gameboard($x,$y) ne " "} {
+        return;
+    } elseif {$chan == $playerX && $settings(current) == "X" && $gameboard($x,$y) != "X"} {
+        set gameboard($x,$y) "X";
+        switchUser;
+    } elseif {$chan == $playerO && $settings(current) == "O" && $gameboard($x,$y) != "O"} {
+        set gameboard($x,$y) "O";
+        switchUser;
+    }
+    #set gameboard($x,$y) $settings(current)
+    set wehaveawinner 0;
+    if {[string match "X" $gameboard($x,$y)] || [string match "O" $gameboard($x,$y)]} {
+        set wehaveawinner [verifyWinner $gameboard($x,$y) $chan];
+    }
+    if {$wehaveawinner} {
+        printBoard;
+        reset_gameboard;
+    }
+}
+
+if {0} {
+proc placeXorO {chan x y} {
+    global gameboard settings activeClients playerX playerO
+        if {$gameboard($x,$y) ne " "} {
+            return;
+        } elseif {$chan == $playerX && $settings(current) == "X"} {
+            set gameboard($x,$y) "X";
+        } elseif {$chan == $playerO && $settings(current) == "O"} {
+            set gameboard($x,$y) "O";
+        }
+        #set gameboard($x,$y) $settings(current)
+    set wehaveawinner [verifyWinner $gameboard($x,$y) $chan];
+    switchUser;
+    if {$wehaveawinner} {
+        printBoard;
+        reset_gameboard;
+    }
+}
+}
+
+proc switchUser {} {
+    global settings
+   switch -- $settings(current) {
+       X { set settings(current) O }
+       O { set settings(current) X }
+   }
+}
+
+proc verifyWinner {type chan} {
+    set win 0;
+    incr win [verifyDiagonals $type]
+    incr win [verifyHorizontal $type]
+    incr win [verifyVertical $type]
+    incr win [verifyTie $type]
+    
+    if {$win == 1} {
+        #displays who wins to the server
+        set winner "Player $type wins!"
+        #set winner to also display "CHAT"
+        #so it can string match with the rest of messages
+        #NOTE: would like it so that winner displays to both winner and loser
+        sendMessageToClients "CHAT WINNER: $winner"
+    } elseif {$win == 2} {
+        set tie "Its a tie!"
+        sendMessageToClients "CHAT WINNER: $tie"
+    }
+    return $win;
+}
+
+proc verifyDiagonals {type} {
+    global gameboard
+    if {$gameboard(1,1) == $type && $gameboard(2,2) == $type && $gameboard(3,3) == $type} {
+        return 1
+    }
+    if {$gameboard(1,3) == $type && $gameboard(2,2) == $type && $gameboard(3,1) == $type} {
+        return 1
+    }
+    
+    return 0
+}
+
+#verify the 3 horizontal lines
+proc verifyHorizontal {type} {
+    global gameboard
+    for {set y 1} {$y<=3} {incr y} {
+        if {$gameboard(1,$y) == $type && $gameboard(2,$y) == $type && $gameboard(3,$y) == $type} {
+            return 1
+        }
+    }
+    return 0
+}
+
+#Verify the 3 vertical lines
+proc verifyVertical {type} {
+    global gameboard
+    for {set x 1} {$x<=3} {incr x} {
+        if {$gameboard($x,1) == $type && $gameboard($x,2) == $type && $gameboard($x,3) == $type} {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+#Verify tie
+proc verifyTie {type} {
+    global gameboard;
+    if {$gameboard(1,1) in {"X" "O"} && $gameboard(1,2) in {"X" "O"} && $gameboard(1,3) in {"X" "O"} &&
+        $gameboard(2,1) in {"X" "O"} && $gameboard(2,2) in {"X" "O"} && $gameboard(2,3) in {"X" "O"} &&
+        $gameboard(3,1) in {"X" "O"} && $gameboard(3,2) in {"X" "O"} && $gameboard(3,3) in {"X" "O"}} {
+            return 2;
+    } else {
+        return 0;
+    }
+}
+
+proc accept {chan addr port} {
+  fconfigure $chan -buffering line;
+  fileevent $chan readable [list handleClients $chan $addr $port ]
+};
+
+proc handleClients {chan addr port} {
+    global activeClients playerX playerO;
+    set ttt [gets $chan]
+        if {[string length $ttt] == 0} {
+            removeClient $chan;
+            # Must return after removing this client;
+            return;
+        }
+    puts "$ttt"
+    if {$chan ni $activeClients} {
+        lappend activeClients $chan;
+    }
+    if {[string match "CLICK*" $ttt]} {
+        # Command looks like "CLICK x y XorO";
+        lassign $ttt click x y curuser;
+        placeXorO $chan $x $y;
+				printBoard;
+    }
+    if {[string match "CLEAR" $ttt]} {
+        reset_gameboard;
+    }
+
+    #Adds functionality to the message board inside the client app
+    #string matched to "CHAT" because all chat messages sent to chan
+    #are tagged with "CHAT" to be idendified with string match
+    if {[string match "CHAT*" $ttt]} {
+        sendMessageToClients $ttt
+    }
+    
+    # Now we allocate player X and player O
+    #Player X
+    if {[string match "sock" $playerX]} {
+    } else {
+        set playerX [lindex $activeClients 0];
+    }
+
+    #Player O
+    if {[string match "sock" $playerO]} {
+    } else {
+        set playerO [lindex $activeClients 1];
+    }
+
+    # Now we need to tell all of our clients what the new state of the board is:
+    sendStateToClients;
+}
+
+#sends the current state of the board to all connectecd clients
+proc sendStateToClients {} {
+  global activeClients;
+	foreach ac $activeClients {
+        sendBoard $ac;
+	}
+}
+
+proc sendMessageToClients {msg} {
+    global activeClients;
+    foreach chan $activeClients {
+        if {[catch {puts $chan "$msg"} ret] != 0 } { 
+        }
+    }
+}
+
+proc removeClient {chan} {
+    global activeClients;
+    if {$chan ni $activeClients} return; #if channel not in active clients return
+    catch {close $chan}; #close chan 
+    set idx [lsearch $activeClients $chan]; #sets index to search for activeclients and channel
+    set activeClients [lreplace $activeClients $idx $idx]; #sets activeClients to replace data with index
+}
+
+#Function that takes min and max and generates a random integer number
+proc rnd {min max} {
+    expr {int(($max - $min + 1) * rand()) + $min}
+}
+
+reset_gameboard;
+socket -server accept 3000 ;# Create a server socket
+vwait forever; # Enter the event loop
+puts "Exiting!"
