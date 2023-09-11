@@ -1,0 +1,149 @@
+package require Tk;
+array set gameboard ""
+set buttonClick ""
+tk_setPalette background gray
+
+proc build_passGui {chan} {
+    toplevel .b
+    wm title .b "password prompt"
+    grid columnconfigure .b 0 -weight 1; grid rowconfigure . 0 -weight 1
+
+    grid [ttk::entry .b.passwordEntry -width 50 -textvariable passwordEntry] -column 2 -row 3 -sticky nwes
+    grid [ttk::button .b.sendPass -text "ENTER" -command [list serverPass $chan] ] -column 4 -row 3 -sticky e
+}
+
+proc serverPass {chan} { 
+    puts "$::passwordEntry"
+    flush $::chan
+    if {[string match "a" $::passwordEntry]} {
+        set tw [build_gui $chan]
+        fileevent $chan readable [list handleData $tw $chan]
+        wm withdraw .b
+    }
+}
+
+proc build_gui {chan} { 
+    wm title . "tik tak toe"
+    global gameboard
+    ttk::label .lblInfo -text "Player X's turn"
+    grid .lblInfo -row 0 -column 1 -columnspan 3
+    for {set y 1} { $y<=3} { incr y } {
+    	for {set x 1} { $x<=3} { incr x } {
+            set gameboard($x,$y) " "
+            set button_widget ".btn$x$y"
+            set cb [button $button_widget \
+                -textvariable ::gameboard($x,$y) \
+                -command [list placeXorO $button_widget $chan $x $y] \
+                -width 5 -height 2];
+            grid $cb -row $y -column $x -sticky w;
+        }
+    }
+    #The following 2 lines style the buttons
+    ttk::style configure TButton -background white
+    ttk::style configure TButton -foreground blue
+
+    set quitButton ".qbtn"
+    grid [ttk::button $quitButton -text "QUIT" -command [list quitFromServer $chan] ] -column 0 -row 1 -sticky e
+
+    #setting up quick chat like rocket league/regular chat
+    set chat1 ".c1btn"
+    set chat2 ".c2btn"
+    set chat3 ".c3btn"
+    set chat4 ".c4btn"
+    set snd ".sbtn"
+    set msg ".message"
+    grid [ttk::entry $msg -width 50 -textvariable message] -column 8 -row 3 -sticky w
+    grid [ttk::button $snd -text "send" -command [list sendmsg $chan] ] -column 8 -row 2 -sticky w
+    grid [ttk::button $chat1 -text "what a save!" -command [list chat1Server $chan] ] -column 6 -row 3 -sticky e
+    grid [ttk::button $chat2 -text "Rolled!" -command [list chat2Server $chan] ] -column 6 -row 2 -sticky e
+    grid [ttk::button $chat3 -text "WOW!" -command [list chat3Server $chan] ] -column 7 -row 3 -sticky e
+    grid [ttk::button $chat4 -text "Thanks!" -command [list chat4Server $chan] ] -column 7 -row 2 -sticky e
+    #text widget set up for logging chat messages
+    set textwidget ".txt"
+    grid [text $textwidget -width 30 -height 10 ] -column 8 -row 4
+    return $textwidget
+}
+
+#send procs set up for quick chat
+proc sendmsg {chan} {
+  puts $::chan "CHAT M: $::message"
+  flush $chan
+  set ::message ""
+}
+
+proc chat1Server {chan} {
+  puts $::chan "CHAT Q: what a save!"
+  flush $chan
+}
+
+proc chat2Server {chan} {
+  puts $::chan "CHAT Q: rolled"
+  flush $chan
+}
+
+proc chat3Server {chan} {
+  puts $::chan "CHAT Q: WOW!"
+  flush $chan
+}
+
+proc chat4Server {chan} {
+  puts $::chan "CHAT Q: thanks!"
+  flush $chan
+}
+
+# Note, often in callbacks, 'w' is used for 'widget', but
+# we know that this is a button here, so we'll use "btn";
+proc placeXorO {btn chan x y } {
+    global gameboard settings
+    global buttonClick
+		if {$gameboard($x,$y) ne " "} {
+			return;
+		}
+		sendCommand $::chan "CLICK" "$x $y";
+}
+
+proc sendCommand {chan cmd payload} {
+	puts $chan "$cmd $payload";
+}
+
+proc quitFromServer {chan} {
+  puts $chan "QUIT";
+  destroy window .
+}
+
+proc handleData {w chan} {
+    global gameboard settings
+    global buttonClick
+    set server_data [gets $chan];
+    if {[string match "CHAT*" $server_data]} {
+        $w insert end "$server_data\n"
+        }
+	handleCommand $server_data;  
+}
+
+proc handleCommand {str} {
+	puts "Got str: $str";
+	if {[string length $str]==0} return;
+	set therest [lassign $str cmd];
+	puts "cmd = $cmd"
+	puts "therest = $therest"
+	if {$cmd ne "BOARD"} {
+		return;
+	}
+	set index 0;
+  for {set y 1} { $y<=3} { incr y } {
+  	for {set x 1} { $x<=3} { incr x } {
+			set val [lindex $therest $index];
+			set ::gameboard($x,$y) $val;
+			incr index;
+    }
+  }
+}
+
+set chan [socket "localhost" 3000];# Open the connection
+set passGui [build_passGui $chan]
+fconfigure $chan -buffering line; #adds buffering of the code
+puts $chan "NEW CONNECTION"; #puts "new connection" whenever somone new joins server.
+
+tkwait window .
+close $chan;
