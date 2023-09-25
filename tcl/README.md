@@ -1,1 +1,1 @@
-
+This is the TCL (Tool Command Language) folder of my portfolio. Here you will find my fully functional tic-tac-toe game that you can play with a friend online by running 2 instances of the client while the server is active.
